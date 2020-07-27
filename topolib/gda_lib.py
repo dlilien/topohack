@@ -10,7 +10,7 @@ from rasterio import features
 # TODO sort functions alphabetically and add docstring
 
 #this function is from Ben
-def ATL06_to_dict(filename, dataset_dict):
+def ATL06_to_dict(filename, dataset_dict, ancillary=False):
     """
         Read selected datasets from an ATL06 file
 
@@ -19,6 +19,8 @@ def ATL06_to_dict(filename, dataset_dict):
             dataset_dict: A dictinary describing the fields to be read
                     keys give the group names to be read,
                     entries are lists of datasets within the groups
+            ancillary: bool for whether to read non-beam data (ancillary and orbital).
+                    Use this to avoid a re-read of the hdf5 if you need the metadata.
         Output argument:
             D6: dictionary containing ATL06 data.  Each dataset in
                 dataset_dict has its own entry in D6.  Each dataset
@@ -31,6 +33,17 @@ def ATL06_to_dict(filename, dataset_dict):
     beams=['l','r']
     # open the HDF5 file
     with h5py.File(filename) as h5f:
+        if ancillary:
+            anc={}
+            for group in dataset_dict.keys():
+                for dataset in dataset_dict[group]:
+                    DS = '/%s/%s' % (group, dataset)
+                    try:
+                        anc[dataset] = np.array(h5f[DS])[0]
+                    except KeyError:
+                        # This should just mean that it is a beam attribute
+                        pass
+ 
         # loop over beam pairs
         for pair in pairs:
             # loop over beams
@@ -54,12 +67,15 @@ def ATL06_to_dict(filename, dataset_dict):
                                 temp[dataset][bad]=np.NaN
                         except KeyError as e:
                             pass
+
                 if len(temp) > 0:
                     # it's sometimes convenient to have the beam and the pair as part of the output data structure: This is how we put them there.
                     temp['pair']=np.zeros_like(temp['h_li'])+pair
                     temp['beam']=np.zeros_like(temp['h_li'])+beam_ind
                     #temp['filename']=filename
                     D6.append(temp)
+    if ancillary:
+        D6.append(anc)
     return D6
 #this function is from Ben
 def ATL08_to_dict(filename, dataset_dict):
@@ -187,7 +203,7 @@ def point_covert(row):
     geom = Point(row['longitude'],row['latitude'])
     return geom
 
-def ATL06_2_gdf(ATL06_fn,dataset_dict):
+def ATL06_2_gdf(ATL06_fn,dataset_dict,ancillary=False):
     """
     function to convert ATL06 hdf5 to geopandas dataframe, containing columns as passed in dataset dict
     Used Ben's ATL06_to_dict function
@@ -197,10 +213,13 @@ def ATL06_2_gdf(ATL06_fn,dataset_dict):
     if ('longitude' in dataset_dict['land_ice_segments']) != True:
         dataset_dict['land_ice_segments'].append('longitude')
     #use Ben's Scripts to convert to dict
-    data_dict = ATL06_to_dict(ATL06_fn,dataset_dict)
+    data_dict = ATL06_to_dict(ATL06_fn,dataset_dict,ancillary=ancillary)
+
+    if ancillary:
+        anc = data_dict.pop()
+
     #this will give us 6 tracks
-    i = 0
-    for track in data_dict:
+    for i, track in enumerate(data_dict):
         #1 track
         #convert to datafrmae
         df = pd.DataFrame(track)
@@ -210,7 +229,10 @@ def ATL06_2_gdf(ATL06_fn,dataset_dict):
             df_final = df.copy()
         else:
             df_final = df_final.append(df)
-        i = i+1
+    if ancillary:
+        for key, val in anc.items():
+            print(key, val)
+            df_final[key] = val
     gdf_final = gpd.GeoDataFrame(df_final,geometry='geometry',crs={'init':'epsg:4326'})
     return gdf_final
 
