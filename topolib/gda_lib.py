@@ -11,7 +11,7 @@ import rasterio
 
 
 def ATL_to_dict(filename, dataset_dict, check_name='land_ice_segments',
-                h_name='h_li', ancillary=False):
+                ancillary=False):
     """
     Read selected datasets from any ATL file. Wrap for each ATL type.
 
@@ -29,10 +29,11 @@ def ATL_to_dict(filename, dataset_dict, check_name='land_ice_segments',
         ancillary: bool for whether to read non-beam data (ancillary and orbital).
                 Use this to avoid a re-read of the hdf5 if you need the metadata.
     Output argument:
-        D6: dictionary containing ATL06 data.  Each dataset in
-            dataset_dict has its own entry in D6.  Each dataset
-            in D6 contains a list of numpy arrays containing the
-            data
+        D: dictionary containing ATL06 data.  Each dataset in
+           dataset_dict has its own entry in D.  Each dataset
+           in D6 contains a list of numpy arrays containing the
+           data. If ancillary data, there is an additional dictionary,
+           which contains the file-wide properties.
     """
     D=[]
     name_fmt='gt%d%s'
@@ -76,9 +77,12 @@ def ATL_to_dict(filename, dataset_dict, check_name='land_ice_segments',
                             pass
 
                 if len(temp) > 0:
-                    # it's sometimes convenient to have the beam and the pair as part of the output data structure: This is how we put them there.
-                    temp['pair']=np.zeros_like(temp[h_name])+pair
-                    temp['beam']=np.zeros_like(temp[h_name])+beam_ind
+                    # it's sometimes convenient to have the beam and the pair as part of the output
+                    # data structure: This is how we put them there.
+                    # Changed by DL because there is no requirement that a particular
+                    # value is in the dict...
+                    temp['pair']=np.zeros_like(list(temp.values())[0])+pair
+                    temp['beam']=np.zeros_like(list(temp.values())[0])+beam_ind
                     #temp['filename']=filename
                     D.append(temp)
     if ancillary:
@@ -87,7 +91,7 @@ def ATL_to_dict(filename, dataset_dict, check_name='land_ice_segments',
 
 
 def ATL_2_gdf(ATL_fn, dataset_dict, check_name='land_ice_segments',
-                h_name='h_li', ancillary=False):
+                ancillary=False):
     """Convert ATL hdf5 to geopandas dataframe.
 
     All arguments passed to ATL_to_dict (from Ben).
@@ -96,12 +100,12 @@ def ATL_2_gdf(ATL_fn, dataset_dict, check_name='land_ice_segments',
     columns with all values identical containing those data.
     """
     if ('latitude' in dataset_dict[check_name]):
-        dataset_dict['land_ice_segments'].append('latitude')
+        dataset_dict[check_name].append('latitude')
     if ('longitude' in dataset_dict[check_name]):
-        dataset_dict['land_ice_segments'].append('longitude')
+        dataset_dict[check_name].append('longitude')
     #use Ben's Scripts to convert to dict
     data_dict = ATL_to_dict(ATL_fn, dataset_dict, check_name=check_name,
-                h_name=h_name, ancillary=ancillary)
+                ancillary=ancillary)
 
     if ancillary:
         anc = data_dict.pop()
@@ -129,33 +133,29 @@ def ATL_2_gdf(ATL_fn, dataset_dict, check_name='land_ice_segments',
 def ATL06_to_dict(filename, dataset_dict, ancillary=False):
     """Call ATL_to_dict with defaults for ATL06."""
     check_name = 'land_ice_segments'
-    h_name = 'h_li'
     return ATL_to_dict(filename, dataset_dict, check_name=check_name,
-                       h_name=h_name, ancillary=ancillary)
+                       ancillary=ancillary)
 
 
 def ATL08_to_dict(filename, dataset_dict, ancillary=False):
     """Call ATL_to_dict with defaults for ATL08."""
     check_name = 'land_segments'
-    h_name = 'h_te_best_fit'
     return ATL_to_dict(filename, dataset_dict, check_name=check_name,
-                       h_name=h_name, ancillary=ancillary)
+                       ancillary=ancillary)
 
 
 def ATL06_2_gdf(ATL_fn, dataset_dict, ancillary=False):
     """Wrap ATL_2_gdf with defaults for ATL_06."""
     check_name = 'land_ice_segments'
-    h_name = 'h_li'
     return ATL_2_gdf(ATL_fn, dataset_dict, check_name=check_name,
-                     h_name=h_name, ancillary=ancillary)
+                     ancillary=ancillary)
 
 
 def ATL08_2_gdf(ATL_fn, dataset_dict, ancillary=False):
     """Wrap ATL_2_gdf with defaults for ATL_08."""
     check_name = 'land_segments'
-    h_name = 'h_te_best_fit'
     return ATL_2_gdf(ATL_fn, dataset_dict, check_name=check_name,
-                     h_name=h_name, ancillary=ancillary)
+                     ancillary=ancillary)
 
 
 def dem2polygon(dem_file_name):
