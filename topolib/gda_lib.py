@@ -4,31 +4,38 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point, Polygon
 import rasterio
-from rasterio import features
-#import rasterstats as rs
+# from rasterio import features
+# import rasterstats as rs
 
 # TODO sort functions alphabetically and add docstring
 
-#this function is from Ben
-def ATL06_to_dict(filename, dataset_dict, ancillary=False):
-    """
-        Read selected datasets from an ATL06 file
 
-        Input arguments:
-            filename: ATl06 file to read
-            dataset_dict: A dictinary describing the fields to be read
-                    keys give the group names to be read,
-                    entries are lists of datasets within the groups
-            ancillary: bool for whether to read non-beam data (ancillary and orbital).
-                    Use this to avoid a re-read of the hdf5 if you need the metadata.
-        Output argument:
-            D6: dictionary containing ATL06 data.  Each dataset in
-                dataset_dict has its own entry in D6.  Each dataset
-                in D6 contains a list of numpy arrays containing the
-                data
+def ATL_to_dict(filename, dataset_dict, check_name='land_ice_segments',
+                h_name='h_li', ancillary=False):
     """
+    Read selected datasets from any ATL file. Wrap for each ATL type.
 
-    D6=[]
+    From Ben.
+
+    Input arguments:
+        filename: ATl file to read
+        dataset_dict: A dictinary describing the fields to be read
+                keys give the group names to be read,
+                entries are lists of datasets within the groups
+        pairs: Beam pairs to search for
+        beams: names of right and left beams
+        name_fmt: How beam names are stored
+        check_name: name_fmt/check_name is checked to exist in each file
+        ancillary: bool for whether to read non-beam data (ancillary and orbital).
+                Use this to avoid a re-read of the hdf5 if you need the metadata.
+    Output argument:
+        D6: dictionary containing ATL06 data.  Each dataset in
+            dataset_dict has its own entry in D6.  Each dataset
+            in D6 contains a list of numpy arrays containing the
+            data
+    """
+    D=[]
+    name_fmt='gt%d%s'
     pairs=[1, 2, 3]
     beams=['l','r']
     # open the HDF5 file
@@ -49,13 +56,13 @@ def ATL06_to_dict(filename, dataset_dict, ancillary=False):
             # loop over beams
             for beam_ind, beam in enumerate(beams):
                 # check if a beam exists, if not, skip it
-                if '/gt%d%s/land_ice_segments' % (pair, beam) not in h5f:
+                if '/' + (name_fmt % (pair, beam)) + '/' + check_name not in h5f:
                     continue
                 # loop over the groups in the dataset dictionary
                 temp={}
                 for group in dataset_dict.keys():
                     for dataset in dataset_dict[group]:
-                        DS='/gt%d%s/%s/%s' % (pair, beam, group, dataset)
+                        DS='/' + (name_fmt % (pair, beam)) + '/%s/%s' % (group, dataset)
                         # since a dataset may not exist in a file, we're going to try to read it, and if it doesn't work, we'll move on to the next:
                         try:
                             temp[dataset]=np.array(h5f[DS])
@@ -70,82 +77,37 @@ def ATL06_to_dict(filename, dataset_dict, ancillary=False):
 
                 if len(temp) > 0:
                     # it's sometimes convenient to have the beam and the pair as part of the output data structure: This is how we put them there.
-                    temp['pair']=np.zeros_like(temp['h_li'])+pair
-                    temp['beam']=np.zeros_like(temp['h_li'])+beam_ind
+                    temp['pair']=np.zeros_like(temp[h_name])+pair
+                    temp['beam']=np.zeros_like(temp[h_name])+beam_ind
                     #temp['filename']=filename
-                    D6.append(temp)
+                    D.append(temp)
     if ancillary:
-        D6.append(anc)
-    return D6
-#this function is from Ben
-def ATL08_to_dict(filename, dataset_dict):
-    """
-        Read selected datasets from an ATL06 file
-        Input arguments:
-            filename: ATl06 file to read
-            dataset_dict: A dictinary describing the fields to be read
-                    keys give the group names to be read,
-                    entries are lists of datasets within the groups
-        Output argument:
-            D6: dictionary containing ATL06 data.  Each dataset in
-                dataset_dict has its own entry in D6.  Each dataset
-                in D6 contains a list of numpy arrays containing the
-                data
-    """
+        D.append(anc)
+    return D
 
-    D6=[]
-    pairs=[1, 2, 3]
-    beams=['l','r']
-    # open the HDF5 file
-    with h5py.File(filename) as h5f:
-        # loop over beam pairs
-        for pair in pairs:
-            # loop over beams
-            for beam_ind, beam in enumerate(beams):
-                # check if a beam exists, if not, skip it
-                if '/gt%d%s/land_segments' % (pair, beam) not in h5f:
-                    continue
-                # loop over the groups in the dataset dictionary
-                temp={}
-                for group in dataset_dict.keys():
-                    for dataset in dataset_dict[group]:
-                        DS='/gt%d%s/%s/%s' % (pair, beam, group, dataset)
-                        # since a dataset may not exist in a file, we're going to try to read it, and if it doesn't work, we'll move on to the next:
-                        try:
-                            temp[dataset]=np.array(h5f[DS])
-                            # some parameters have a _FillValue attribute.  If it exists, use it to identify bad values, and set them to np.NaN
-                            if '_FillValue' in h5f[DS].attrs:
-                                fill_value=h5f[DS].attrs['_FillValue']
-                                bad = temp[dataset]==fill_value
-                                temp[dataset]=np.float64(temp[dataset])
-                                temp[dataset][bad]=np.NaN
-                        except KeyError as e:
-                            pass
-                if len(temp) > 0:
-                    # it's sometimes convenient to have the beam and the pair as part of the output data structure: This is how we put them there.
-                    #a = np.zeros_like(temp['h_te_best_fit'])
-                    #print(a)
-                    temp['pair']=np.zeros_like(temp['h_te_best_fit'])+pair
-                    temp['beam']=np.zeros_like(temp['h_te_best_fit'])+beam_ind
-                    #temp['filename']=filename
-                    D6.append(temp)
-    return D6
 
-def ATL08_2_gdf(ATL06_fn,dataset_dict):
+def ATL_2_gdf(ATL_fn, dataset_dict, check_name='land_ice_segments',
+                h_name='h_li', ancillary=False):
+    """Convert ATL hdf5 to geopandas dataframe.
+
+    All arguments passed to ATL_to_dict (from Ben).
+
+    If ancillary data, and there are such data requested, there will be
+    columns with all values identical containing those data.
     """
-    function to convert ATL06 hdf5 to geopandas dataframe, containing columns as passed in dataset dict
-    Used Ben's ATL06_to_dict function
-    """
-    if ('latitude' in dataset_dict['land_segments']) != True:
-        dataset_dict['land_segments'].append('latitude')
-    if ('longitude' in dataset_dict['land_segments']) != True:
-        dataset_dict['land_segments'].append('longitude')
+    if ('latitude' in dataset_dict[check_name]):
+        dataset_dict['land_ice_segments'].append('latitude')
+    if ('longitude' in dataset_dict[check_name]):
+        dataset_dict['land_ice_segments'].append('longitude')
     #use Ben's Scripts to convert to dict
-    
-    data_dict = ATL08_to_dict(ATL06_fn,dataset_dict)
+    data_dict = ATL_to_dict(ATL_fn, dataset_dict, check_name=check_name,
+                h_name=h_name, ancillary=ancillary)
+
+    if ancillary:
+        anc = data_dict.pop()
+
     #this will give us 6 tracks
-    i = 0
-    for track in data_dict:
+    for i, track in enumerate(data_dict):
         #1 track
         #convert to datafrmae
         df = pd.DataFrame(track)
@@ -155,9 +117,46 @@ def ATL08_2_gdf(ATL06_fn,dataset_dict):
             df_final = df.copy()
         else:
             df_final = df_final.append(df)
-        i = i+1
+
+    if ancillary:
+        for key, val in anc.items():
+            df_final[key] = val
     gdf_final = gpd.GeoDataFrame(df_final,geometry='geometry',crs={'init':'epsg:4326'})
+
     return gdf_final
+
+
+def ATL06_to_dict(filename, dataset_dict, ancillary=False):
+    """Call ATL_to_dict with defaults for ATL06."""
+    check_name = 'land_ice_segments'
+    h_name = 'h_li'
+    return ATL_to_dict(filename, dataset_dict, check_name=check_name,
+                       h_name=h_name, ancillary=ancillary)
+
+
+def ATL08_to_dict(filename, dataset_dict, ancillary=False):
+    """Call ATL_to_dict with defaults for ATL08."""
+    check_name = 'land_segments'
+    h_name = 'h_te_best_fit'
+    return ATL_to_dict(filename, dataset_dict, check_name=check_name,
+                       h_name=h_name, ancillary=ancillary)
+
+
+def ATL06_2_gdf(ATL_fn, dataset_dict, ancillary=False):
+    """Wrap ATL_2_gdf with defaults for ATL_06."""
+    check_name = 'land_ice_segments'
+    h_name = 'h_li'
+    return ATL_2_gdf(ATL_fn, dataset_dict, check_name=check_name,
+                     h_name=h_name, ancillary=ancillary)
+
+
+def ATL08_2_gdf(ATL_fn, dataset_dict, ancillary=False):
+    """Wrap ATL_2_gdf with defaults for ATL_08."""
+    check_name = 'land_segments'
+    h_name = 'h_te_best_fit'
+    return ATL_2_gdf(ATL_fn, dataset_dict, check_name=check_name,
+                     h_name=h_name, ancillary=ancillary)
+
 
 def dem2polygon(dem_file_name):
     """
@@ -199,51 +198,20 @@ def dem2polygon(dem_file_name):
     
     return dem_polygon_gdf
 
-def point_covert(row):
-    geom = Point(row['longitude'],row['latitude'])
-    return geom
-
-def ATL06_2_gdf(ATL06_fn,dataset_dict,ancillary=False):
-    """
-    function to convert ATL06 hdf5 to geopandas dataframe, containing columns as passed in dataset dict
-    Used Ben's ATL06_to_dict function
-    """
-    if ('latitude' in dataset_dict['land_ice_segments']) != True:
-        dataset_dict['land_ice_segments'].append('latitude')
-    if ('longitude' in dataset_dict['land_ice_segments']) != True:
-        dataset_dict['land_ice_segments'].append('longitude')
-    #use Ben's Scripts to convert to dict
-    data_dict = ATL06_to_dict(ATL06_fn,dataset_dict,ancillary=ancillary)
-
-    if ancillary:
-        anc = data_dict.pop()
-
-    #this will give us 6 tracks
-    for i, track in enumerate(data_dict):
-        #1 track
-        #convert to datafrmae
-        df = pd.DataFrame(track)
-        df['p_b'] = str(track['pair'][0])+'_'+str(track['beam'][0])
-        df['geometry'] = df.apply(point_covert,axis=1)
-        if i==0:
-            df_final = df.copy()
-        else:
-            df_final = df_final.append(df)
-    if ancillary:
-        for key, val in anc.items():
-            print(key, val)
-            df_final[key] = val
-    gdf_final = gpd.GeoDataFrame(df_final,geometry='geometry',crs={'init':'epsg:4326'})
-    return gdf_final
-
 def get_ndv(ds):
     no_data = ds.nodatavals[0]
-    if no_data == None:
+    if no_data is None:
         #this means no data is not set in tif tag, nead to cheat it from raster
         ndv = ds.read(1)[0,0]
     else:
         ndv = no_data
     return ndv
+
+
+def point_covert(row):
+    geom = Point(row['longitude'],row['latitude'])
+    return geom
+
 
 def sample_near_nbor(ds,geom):
     """
